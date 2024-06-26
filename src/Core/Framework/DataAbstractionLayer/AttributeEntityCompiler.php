@@ -77,6 +77,7 @@ class AttributeEntityCompiler
         ManyToOne::class,
         OneToOne::class,
         ReferenceVersion::class,
+        CustomFieldsAttr::class,
     ];
 
     private const ASSOCIATIONS = [
@@ -221,17 +222,23 @@ class AttributeEntityCompiler
      */
     private function getFieldArgs(string $entity, OneToMany|ManyToMany|ManyToOne|OneToOne|Field|Serialized|AutoIncrement $field, \ReflectionProperty $property): array
     {
-        $storage = $this->converter->normalize($property->getName());
+        if ($field->storageName) {
+            $storage = $this->converter->normalize($field->storageName);
+            $storageFk = $storage;
+        } else {
+            $storage = $this->converter->normalize($property->getName());
+            $storageFk = $storage . '_id';
+        }
 
         return match (true) {
             $field instanceof Translations => [$entity . '_translation', $entity . '_id'],
             $field instanceof ForeignKey => [$storage, $property->getName(), $field->entity],
-            $field instanceof OneToOne => [$property->getName(), $field->column ?? ($storage . '_id'), $field->ref, $field->entity, false],
-            $field instanceof ManyToOne => [$property->getName(), $storage . '_id', $field->entity, $field->ref],
+            $field instanceof OneToOne => [$property->getName(), $storageFk, $field->ref, $field->entity, false],
+            $field instanceof ManyToOne => [$property->getName(), $storageFk, $field->entity, $field->ref],
             $field instanceof OneToMany => [$property->getName(), $field->entity, $field->ref, 'id'],
             $field instanceof ManyToMany => [$property->getName(), $field->entity, self::mappingName($entity, $field), $entity . '_id', $field->entity . '_id'],
             $field instanceof AutoIncrement, $field instanceof Version => [],
-            $field instanceof ReferenceVersion => [$field->entity, $storage],
+            $field instanceof ReferenceVersion => [$field->entity, $storage, $property->getName()],
             $field instanceof Serialized => [$storage, $property->getName(), $field->serializer],
             default => [$storage, $property->getName()]
         };

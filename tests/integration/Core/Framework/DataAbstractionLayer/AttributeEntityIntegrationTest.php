@@ -21,6 +21,7 @@ use Shopware\Core\Framework\DataAbstractionLayer\Pricing\CashRoundingConfig;
 use Shopware\Core\Framework\DataAbstractionLayer\Pricing\Price;
 use Shopware\Core\Framework\DataAbstractionLayer\Pricing\PriceCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
+use Shopware\Core\Framework\Struct\ArrayEntity;
 use Shopware\Core\Framework\Test\IdsCollection;
 use Shopware\Core\Framework\Test\TestCaseBase\IntegrationTestBehaviour;
 use Shopware\Core\System\Currency\CurrencyEntity;
@@ -175,6 +176,7 @@ class AttributeEntityIntegrationTest extends TestCase
             'serialized' => [
                 ['currencyId' => Defaults::CURRENCY, 'gross' => 1, 'net' => 1, 'linked' => true],
             ],
+            'differentName' => 'string',
             'transString' => 'string',
             'transText' => 'text',
             'transInt' => 1,
@@ -227,6 +229,117 @@ class AttributeEntityIntegrationTest extends TestCase
         static::assertEquals(new DateInterval('P1D'), $record->transDateInterval);
         static::assertEquals('Europe/Berlin', $record->transTimeZone);
         static::assertEquals(['key' => 'value'], $record->transJson);
+        static::assertEquals('string', $record->differentName);
+
+        $json = $record->jsonSerialize();
+        unset($json['extensions']);
+
+        static::assertEquals([
+            '_uniqueIdentifier' => $ids->get('first-key'),
+            'versionId' => null,
+            'translated' => $record->getTranslated(),
+            'createdAt' => $record->getCreatedAt()?->format(\DateTime::RFC3339_EXTENDED),
+            'updatedAt' => null,
+            'id' => $ids->get('first-key'),
+            'string' => 'string',
+            'text' => 'text',
+            'int' => 1,
+            'float' => 1.1,
+            'bool' => true,
+            'datetime' => $record->datetime?->format(\DateTime::RFC3339_EXTENDED),
+            'autoIncrement' => 1,
+            'json' => ['key' => 'value'],
+            'date' => $record->date?->format(\DateTime::RFC3339_EXTENDED),
+            'dateInterval' => new DateInterval('P1D'),
+            'timeZone' => 'Europe/Berlin',
+            'serialized' => new PriceCollection([new Price(Defaults::CURRENCY, 1, 1, true)]),
+            'transString' => 'string',
+            'transText' => 'text',
+            'transInt' => 1,
+            'transFloat' => 1.1,
+            'transBool' => true,
+            'transDatetime' => $record->transDatetime?->format(\DateTime::RFC3339_EXTENDED),
+            'transJson' => ['key' => 'value'],
+            'transDate' => $record->transDate?->format(\DateTime::RFC3339_EXTENDED),
+            'transDateInterval' => new DateInterval('P1D'),
+            'transTimeZone' => 'Europe/Berlin',
+            'differentName' => 'string',
+            'currencyId' => null,
+            'followId' => null,
+            'currency' => null,
+            'follow' => null,
+            'aggs' => null,
+            'currencies' => null,
+            'translations' => null,
+            'customFields' => null,
+        ], $json);
+    }
+
+    public function testStorage(): void
+    {
+        $ids = new IdsCollection();
+
+        $data = [
+            'id' => $ids->get('first-key'),
+            'string' => 'string',
+            'text' => 'text',
+            'int' => 1,
+            'float' => 1.1,
+            'bool' => true,
+            'datetime' => new \DateTimeImmutable('2020-01-01 15:15:15'),
+            'date' => new \DateTimeImmutable('2020-01-01 00:00:00'),
+            'dateInterval' => new \DateInterval('P1D'),
+            'timeZone' => 'Europe/Berlin',
+            'json' => ['key' => 'value'],
+            'transString' => 'transString',
+            'serialized' => [
+                ['currencyId' => Defaults::CURRENCY, 'gross' => 1, 'net' => 1, 'linked' => true],
+            ],
+            'storageSerialized' => [
+                ['currencyId' => Defaults::CURRENCY, 'gross' => 1, 'net' => 1, 'linked' => true],
+            ],
+            'storageString' => 'string',
+            'storageText' => 'text',
+            'storageInt' => 1,
+            'storageFloat' => 1.1,
+            'storageBool' => true,
+            'storageDatetime' => new \DateTimeImmutable('2020-01-01 15:15:15'),
+            'storageDate' => new \DateTimeImmutable('2020-01-01 00:00:00'),
+            'storageDateInterval' => new \DateInterval('P1D'),
+            'storageTimeZone' => 'Europe/Berlin',
+            'storageJson' => ['key' => 'value'],
+        ];
+
+        $result = $this->repository('attribute_entity')->create([$data], Context::createDefaultContext());
+
+        static::assertNotEmpty($result->getPrimaryKeys('attribute_entity'));
+        $written = $result->getPrimaryKeys('attribute_entity');
+        static::assertContains($ids->get('first-key'), $written);
+
+        $search = $this->repository('attribute_entity')
+            ->search(new Criteria([$ids->get('first-key')]), Context::createDefaultContext());
+
+        static::assertCount(1, $search);
+        static::assertTrue($search->has($ids->get('first-key')));
+
+        $record = $search->get($ids->get('first-key'));
+
+        static::assertInstanceOf(AttributeEntity::class, $record);
+
+        static::assertEquals('string', $record->storageString);
+        static::assertEquals('text', $record->storageText);
+        static::assertEquals(1, $record->storageInt);
+        static::assertEquals(1.1, $record->storageFloat);
+        static::assertTrue($record->storageBool);
+        static::assertEquals(new \DateTimeImmutable('2020-01-01 15:15:15'), $record->storageDatetime);
+        static::assertEquals(new \DateTimeImmutable('2020-01-01 00:00:00'), $record->storageDate);
+        static::assertEquals(new DateInterval('P1D'), $record->storageDateInterval);
+        static::assertEquals('Europe/Berlin', $record->storageTimeZone);
+        static::assertEquals(['key' => 'value'], $record->storageJson);
+        static::assertEquals(
+            new PriceCollection([new Price(Defaults::CURRENCY, 1, 1, true)]),
+            $record->storageSerialized
+        );
     }
 
     public function testStorage(): void
@@ -558,14 +671,13 @@ class AttributeEntityIntegrationTest extends TestCase
         static::assertCount(1, $record->currencies);
         static::assertArrayHasKey($ids->get('currency-2'), $record->currencies);
     }
-
-    public function testManyToManyVersioned(): void
-    {
-        $ids = new IdsCollection();
+  
+    public function testManyToManyVersioned(): void {
+         $ids = new IdsCollection();
 
         $data = [
             'id' => $ids->get('first-key'),
-            'string' => 'string',
+            'string' => 'string', 
             'transString' => 'transString',
             'orders' => [
                 self::order($ids->get('order-1'), $this->getStateMachineState(), $this->getValidCountryId()),
@@ -575,10 +687,10 @@ class AttributeEntityIntegrationTest extends TestCase
 
         $result = $this->repository('attribute_entity')
                        ->create([$data], Context::createDefaultContext());
-
+    
         static::assertNotEmpty($result->getPrimaryKeys('attribute_entity'));
         static::assertContains($ids->get('first-key'), $result->getPrimaryKeys('attribute_entity'));
-
+      
         static::assertNotEmpty($result->getPrimaryKeys('order'));
         static::assertContains($ids->get('order-1'), $result->getPrimaryKeys('order'));
         static::assertContains($ids->get('order-2'), $result->getPrimaryKeys('order'));
@@ -618,6 +730,108 @@ class AttributeEntityIntegrationTest extends TestCase
         static::assertArrayHasKey($ids->get('order-2'), $record->orders);
     }
 
+    }
+
+    public function testTranslations(): void
+    {
+        $ids = new IdsCollection();
+
+        $data = [
+            'id' => $ids->get('first-key'),
+            'string' => 'string',
+            'transString' => [
+                'en-GB' => 'transString',
+                'de-DE' => 'transString-de',
+            ],
+        ];
+
+        $result = $this->repository('attribute_entity')->create([$data], Context::createDefaultContext());
+
+        static::assertNotEmpty($result->getPrimaryKeys('attribute_entity'));
+        static::assertContains($ids->get('first-key'), $result->getPrimaryKeys('attribute_entity'));
+
+        $context = Context::createDefaultContext();
+        $search = $this->repository('attribute_entity')
+            ->search(new Criteria([$ids->get('first-key')]), $context);
+
+        $record = $search->get($ids->get('first-key'));
+        static::assertInstanceOf(AttributeEntity::class, $record);
+        static::assertEquals('transString', $record->getTranslation('transString'));
+        // translation association was not loaded in the criteria
+        static::assertEmpty($record->translations);
+
+        $criteria = new Criteria([$ids->get('first-key')]);
+        $criteria->addAssociation('translations');
+        $languageContext = new Context(
+            $context->getSource(),
+            $context->getRuleIds(),
+            $context->getCurrencyId(),
+            [$this->getDeDeLanguageId(), Defaults::LANGUAGE_SYSTEM],
+        );
+        $search = $this->repository('attribute_entity')
+            ->search($criteria, $languageContext);
+
+        $record = $search->get($ids->get('first-key'));
+        static::assertInstanceOf(AttributeEntity::class, $record);
+        static::assertEquals('transString-de', $record->getTranslation('transString'));
+        $translations = $record->translations ?? [];
+        static::assertCount(2, $translations);
+
+        foreach ($translations as $translation) {
+            static::assertInstanceOf(ArrayEntity::class, $translation);
+            if ($translation->get('languageId') === Defaults::LANGUAGE_SYSTEM) {
+                static::assertEquals('transString', $translation->get('transString'));
+            } else {
+                static::assertEquals('transString-de', $translation->get('transString'));
+            }
+        }
+    }
+
+    public function testCustomFields(): void
+    {
+        $ids = new IdsCollection();
+
+        $data = [
+            'id' => $ids->get('first-key'),
+            'string' => 'string',
+            'transString' => 'transString',
+        ];
+
+        $result = $this->repository('attribute_entity')->create([$data], Context::createDefaultContext());
+
+        static::assertNotEmpty($result->getPrimaryKeys('attribute_entity'));
+        static::assertContains($ids->get('first-key'), $result->getPrimaryKeys('attribute_entity'));
+
+        $context = Context::createDefaultContext();
+        $search = $this->repository('attribute_entity')
+            ->search(new Criteria([$ids->get('first-key')]), $context);
+
+        $record = $search->get($ids->get('first-key'));
+        static::assertInstanceOf(AttributeEntity::class, $record);
+        static::assertEmpty($record->getCustomFields());
+
+        $result = $this->repository('attribute_entity')->update([
+            [
+                'id' => $ids->get('first-key'),
+                'customFields' => [
+                    'foo' => 'bar',
+                    'bar' => 'baz',
+                ],
+            ],
+        ], Context::createDefaultContext());
+
+        $search = $this->repository('attribute_entity')
+            ->search(new Criteria([$ids->get('first-key')]), $context);
+
+        $record = $search->get($ids->get('first-key'));
+        static::assertInstanceOf(AttributeEntity::class, $record);
+        static::assertEquals([
+            'foo' => 'bar',
+            'bar' => 'baz',
+        ], $record->getCustomFields());
+        static::assertEquals('bar', $record->getCustomFieldsValue('foo'));
+        static::assertEquals('baz', $record->getCustomFieldsValue('bar'));
+    }
 
     private function repository(string $entity): EntityRepository
     {

@@ -10,6 +10,7 @@ use Shopware\Core\Checkout\Cart\LineItem\LineItem;
 use Shopware\Core\Checkout\Cart\SalesChannel\CartService;
 use Shopware\Core\Checkout\Customer\CustomerEntity;
 use Shopware\Core\Checkout\Customer\Event\CustomerLoginEvent;
+use Shopware\Core\Checkout\Customer\Event\CustomerLogoutEvent;
 use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Adapter\Cache\Http\CacheResponseSubscriber;
 use Shopware\Core\Framework\Event\BeforeSendResponseEvent;
@@ -54,6 +55,7 @@ class CacheResponseSubscriberTest extends TestCase
             ],
             BeforeSendResponseEvent::class => 'updateCacheControlForBrowser',
             CustomerLoginEvent::class => 'onCustomerLogin',
+            CustomerLogoutEvent::class => 'onCustomerLogout',
         ];
 
         static::assertSame($expected, CacheResponseSubscriber::getSubscribedEvents());
@@ -588,6 +590,57 @@ class CacheResponseSubscriberTest extends TestCase
         yield 'post request' => [$postRequest];
     }
 
+    #[DataProvider('cookiesUntouchedProvider')]
+    public function testCookiesAreUntouched(Request $request, ?Response $response = null): void
+    {
+        $subscriber = new CacheResponseSubscriber(
+            $this->createMock(CartService::class),
+            100,
+            true,
+            new MaintenanceModeResolver(new EventDispatcher()),
+            new RequestStack(),
+            false,
+            null,
+            null
+        );
+
+        if (!$response) {
+            $response = new Response();
+        }
+
+        $subscriber->setResponseCache(new ResponseEvent(
+            $this->createMock(HttpKernelInterface::class),
+            $request,
+            HttpKernelInterface::MAIN_REQUEST,
+            $response
+        ));
+
+        static::assertEmpty($response->headers->getCookies(), var_export($response->headers->getCookies(), true));
+        static::assertFalse($response->headers->has('set-cookie'));
+    }
+
+    /**
+     * @return array<string, array{0: Request, 1?: Response}>
+     */
+    public static function cookiesUntouchedProvider(): iterable
+    {
+        $salesChannelContext = Generator::createSalesChannelContext();
+        $salesChannelContext->assign(['customer' => null]);
+
+        $salesChannelRequest = new Request([], [], [PlatformRequest::ATTRIBUTE_SALES_CHANNEL_CONTEXT_OBJECT => $salesChannelContext]);
+        $salesChannelRequest->cookies->set(CacheResponseSubscriber::CONTEXT_CACHE_COOKIE, 'foo');
+        $salesChannelRequest->cookies->set(CacheResponseSubscriber::SYSTEM_STATE_COOKIE, 'logged-in');
+
+        $maintenanceRequest = clone $salesChannelRequest;
+        $maintenanceRequest->attributes->set(SalesChannelRequest::ATTRIBUTE_SALES_CHANNEL_MAINTENANCE, true);
+        $maintenanceRequest->attributes->set(SalesChannelRequest::ATTRIBUTE_SALES_CHANNEL_MAINTENANCE_IP_WHITLELIST, \json_encode([self::IP, \JSON_THROW_ON_ERROR]));
+        $maintenanceRequest->server->set('REMOTE_ADDR', self::IP);
+
+        yield 'no sales channel context' => [new Request()];
+        yield 'maintenance request' => [$maintenanceRequest];
+        yield 'not found response' => [$salesChannelRequest, new Response('', Response::HTTP_NOT_FOUND)];
+    }
+
     public function testNoCachingWhenInvalidateStateMatches(): void
     {
         $cartService = $this->createMock(CartService::class);
@@ -760,5 +813,36 @@ class CacheResponseSubscriberTest extends TestCase
             $response->headers->getCookies()[$cookiesAmount - 1]->getName(),
             $assertEqualsErrorMessage
         );
+    }
+
+    public function testRequestContextGetsUpdatedWhileLogout(): void
+    {
+        $customer = new CustomerEntity();
+        $context = Generator::createSalesChannelContext();
+        $context->assign(['customer' => $customer]);
+        $event = new CustomerLogoutEvent($context, $customer);
+
+        $requestStack = new RequestStack();
+        $request = new Request();
+
+        $requestStack->push($request);
+
+        $subscriber = new CacheResponseSubscriber(
+            $this->createStub(CartService::class),
+            100,
+            true,
+            new MaintenanceModeResolver(new EventDispatcher()),
+            $requestStack,
+            false,
+            null,
+            null
+        );
+
+        $subscriber->onCustomerLogout($event);
+
+        $requestContext = $request->attributes->get(PlatformRequest::ATTRIBUTE_SALES_CHANNEL_CONTEXT_OBJECT);
+        static::assertInstanceOf(SalesChannelContext::class, $requestContext);
+        static::assertNull($requestContext->getCustomer());
+        static::assertNull($requestContext->getCustomerId());
     }
 }
